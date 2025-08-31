@@ -39,8 +39,17 @@ def get_youtube_id(url):
 def get_gemini_model(api_key):
     """Returns a cached instance of the Gemini model."""
     genai.configure(api_key=api_key)
-    return genai.GenerativeModel('gemini-1.5-flash-latest')
+    return genai.GenerativeModel('gemini-2.0-flash-lite')
 
+@st.cache_resource
+def get_gemini_chat(api_key, context):
+    model = get_gemini_model(api_key)
+    chat = model.start_chat(history=[])
+    # Initialize with transcript context
+    chat.send_message(
+        f"You are an assistant that answers questions about this transcript:\n{context}"
+    )
+    return chat
 
 def organize_text_with_gemini(text, api_key):
     """Process transcript using Gemini AI API."""
@@ -62,36 +71,24 @@ Transcript content: """
 @st.dialog(title="Chat with Gemini", width="large")
 def chat_with_gemini(context, api_key):
     """Chat interface to ask questions about the video transcript using Gemini API."""
-    if "chat_history" not in st.session_state:
-        st.session_state["chat_history"] = []
-
-    # Get user input
     user_input = st.chat_input("Ask something about the video...")
+
+    if "chat_session" not in st.session_state:
+        st.session_state["chat_session"] = get_gemini_chat(api_key, context)
+    if "chat_display_history" not in st.session_state:
+        st.session_state["chat_display_history"] = []
+
     if user_input:
-        # Append user message to chat history and display it
-        st.session_state["chat_history"].append({"role": "user", "content": user_input})
-
+        st.session_state["chat_display_history"].append({"role": "user", "content": user_input})
         try:
-            model = get_gemini_model(api_key)
-            # Construct prompt with context and chat history
-            conversation = f"Transcript:\n{context}\n\n"
-            for msg in st.session_state["chat_history"]:
-                role = "User" if msg["role"] == "user" else "Assistant"
-                conversation += f"{role}: {msg['content']}\n"
-            conversation += "Assistant:"
-
-            response = model.generate_content(conversation)
+            response = st.session_state["chat_session"].send_message(user_input)
             answer = response.text.strip()
-
-            # Append assistant response to chat history and display it
-            st.session_state["chat_history"].append({"role": "assistant", "content": answer})
-
+            st.session_state["chat_display_history"].append({"role": "assistant", "content": answer})
         except Exception as e:
             st.error(f"Gemini Q&A Error: {e}")
-            return None
 
-    # Display previous chat messages (in reverse order)
-    for message in reversed(st.session_state["chat_history"]):
+    # Display previous messages in reverse order
+    for message in reversed(st.session_state["chat_display_history"]):
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
