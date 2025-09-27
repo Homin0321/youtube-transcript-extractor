@@ -39,7 +39,7 @@ def get_youtube_id(url):
 def get_gemini_model(api_key):
     """Returns a cached instance of the Gemini model."""
     genai.configure(api_key=api_key)
-    return genai.GenerativeModel('gemini-2.0-flash-lite')
+    return genai.GenerativeModel('gemini-flash-lite-latest')
 
 @st.cache_resource
 def get_gemini_chat(api_key, context):
