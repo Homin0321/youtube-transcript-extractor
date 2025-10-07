@@ -28,6 +28,7 @@ def initialize_session_state():
         if key not in st.session_state:
             st.session_state[key] = value
 
+@st.cache_data
 def get_youtube_id(url):
     """Extracts video ID from YouTube URL (both standard and shorts)."""
     # Check standard YouTube URL
@@ -40,6 +41,7 @@ def get_youtube_id(url):
         return match.group(1)
     return None
 
+@st.cache_data
 def get_youtube_transcript(youtube_url, video_id, selected_lang_code):
     if not youtube_url or not video_id:
         st.sidebar.error("Invalid YouTube URL or video ID.")
@@ -86,10 +88,10 @@ def get_gemini_chat(context):
         )
     return chat
 
-def summarize_text_with_gemini():
+def summarize_text_with_gemini(extracted_text):
     """Process transcript using Gemini AI API."""
     try:
-        text = st.session_state.extracted_text.strip()
+        text = extracted_text.strip()
         if not text:
             st.warning("Extracted transcript is empty. Please extract the transcript first.")
             return None
@@ -115,9 +117,9 @@ def initialize_chat_session(context):
         st.session_state["chat_session"] = None
         st.session_state["chat_display_history"] = []
 
-def chat_with_gemini():
+def chat_with_gemini(extracted_text):
     """Chat interface to ask questions about the video transcript using Gemini API."""
-    context = st.session_state.extracted_text
+    context = extracted_text
     if not context:
         st.info("Please extract a transcript first before using the chat feature.")
         return
@@ -197,7 +199,7 @@ def render_main_content():
 
     with tab2:
         if st.session_state.extracted_text:
-            summarized = summarize_text_with_gemini()
+            summarized = summarize_text_with_gemini(st.session_state.extracted_text)
             if summarized:
                 st.session_state.summarized_text = summarized
                 st.sidebar.success("AI summary generated successfully!")
@@ -209,7 +211,7 @@ def render_main_content():
 
     with tab3:
         if st.session_state.extracted_text:
-            chat_with_gemini()
+            chat_with_gemini(st.session_state.extracted_text)
         else:
             st.info("Chatbot will appear here after extraction.")
 
