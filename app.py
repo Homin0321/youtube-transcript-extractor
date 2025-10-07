@@ -5,23 +5,28 @@ import streamlit as st
 from youtube_transcript_api import YouTubeTranscriptApi, NoTranscriptFound, TranscriptsDisabled
 import google.generativeai as genai
 
-# Configure Streamlit page
-st.set_page_config(layout="wide", page_title="YouTube Transcript Extractor")
+GEMINI_MODEL_NAME = 'gemini-flash-lite-latest'
+TRANSCRIPT_ANALYSIS_PROMPT = """Please analyze the following video transcript and provide a piece of organized content with the following structure:
 
-# Load environment variables
-load_dotenv()
+1.  **Title:** (A concise and descriptive title for the video)
+2.  **Executive Summary:** (2-3 sentences providing a high-level overview of the video's purpose and key takeaways)
+3.  **Detailed Breakdown:**  Organize the transcript into coherent paragraphs, elaborating on the key points. Each paragraph must have a subtitle. Remove any filler words, greetings, or repetitive phrases that do not contribute to a clear understanding of the video's core message.
 
-# Initialize session state variables
-if 'extracted_text' not in st.session_state:
-    st.session_state.extracted_text = ""
-if 'organized_text' not in st.session_state:
-    st.session_state.organized_text = ""
+Transcript content: """
 
-# Sidebar setup
-with st.sidebar:
-    st.title("YouTube Transcript Extractor")
-    youtube_url = st.text_input("Enter YouTube URL:")
-    gemini_api_key = os.getenv("GEMINI_API_KEY")
+def initialize_session_state():
+    default_values = {
+        'youtube_url': "",
+        'gemini_api_key': os.getenv("GEMINI_API_KEY", ""),
+        'extracted_text': "",
+        'summarized_text': "",
+        'chat_session': None,
+        'chat_display_history': []
+    }
+    
+    for key, value in default_values.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
 
 def get_youtube_id(url):
     """Extracts video ID from YouTube URL (both standard and shorts)."""
@@ -35,49 +40,93 @@ def get_youtube_id(url):
         return match.group(1)
     return None
 
+def get_youtube_transcript(youtube_url, video_id, selected_lang_code):
+    if not youtube_url or not video_id:
+        st.sidebar.error("Invalid YouTube URL or video ID.")
+        return
+    
+    if not selected_lang_code:
+        st.sidebar.error("Please select a subtitle language before extracting the transcript.")
+        return
+        
+    with st.spinner("Extracting transcript..."):
+        try:
+            transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=[selected_lang_code])
+            cleaned_text = "\n".join(item['text'] for item in transcript)
+            st.session_state.extracted_text = cleaned_text
+            st.sidebar.success("Transcript successfully extracted!")
+
+        except NoTranscriptFound:
+            st.sidebar.error("No transcript found for the selected language.")
+            st.session_state.extracted_text = ""
+        except TranscriptsDisabled:
+            st.sidebar.error("Transcripts are disabled for this video.")
+            st.session_state.extracted_text = ""
+        except Exception as e:
+            st.sidebar.error(f"An error occurred while extracting the transcript: {str(e)}")
+            st.session_state.extracted_text = ""
+
 @st.cache_resource
-def get_gemini_model(api_key):
-    """Returns a cached instance of the Gemini model."""
-    genai.configure(api_key=api_key)
+def get_gemini_model():
+    if not st.session_state.gemini_api_key:
+        st.error("GEMINI_API_KEY is not set. Please check your .env file.")
+        return None
+
+    genai.configure(api_key=st.session_state.gemini_api_key)
+
     return genai.GenerativeModel('gemini-flash-lite-latest')
 
-@st.cache_resource
-def get_gemini_chat(api_key, context):
-    model = get_gemini_model(api_key)
-    chat = model.start_chat(history=[])
-    # Initialize with transcript context
-    chat.send_message(
-        f"You are an assistant that answers questions about this transcript:\n{context}"
-    )
+def get_gemini_chat(context):
+    with st.spinner("Starting chat with Gemini..."):
+        model = get_gemini_model()
+        chat = model.start_chat(history=[])
+        # Initialize with transcript context
+        chat.send_message(
+            f"You are an assistant that answers questions about this transcript:\n{context}"
+        )
     return chat
 
-def organize_text_with_gemini(text, api_key):
+def summarize_text_with_gemini():
     """Process transcript using Gemini AI API."""
     try:
-        model = get_gemini_model(api_key)
-        prompt = """Please analyze the following video transcript and provide a piece of organized content with the following structure:
+        text = st.session_state.extracted_text.strip()
+        if not text:
+            st.warning("Extracted transcript is empty. Please extract the transcript first.")
+            return None
+        with st.spinner("Summarizing text with Gemini..."):
+            model = get_gemini_model()
+            response = model.generate_content(TRANSCRIPT_ANALYSIS_PROMPT + text)
 
-1.  **Title:** (A concise and descriptive title for the video)
-2.  **Executive Summary:** (2-3 sentences providing a high-level overview of the video's purpose and key takeaways)
-3.  **Detailed Breakdown:**  Organize the transcript into coherent paragraphs, elaborating on the key points. Each paragraph must have a subtitle. Remove any filler words, greetings, or repetitive phrases that do not contribute to a clear understanding of the video's core message.
-
-Transcript content: """
-        response = model.generate_content(prompt + text)
+        if not hasattr(response, 'text'):
+            st.error("Gemini API response does not contain text.")
+            return None
         return response.text
     except Exception as e:
         st.error(f"Gemini API Error: {e}")
         return None
 
-@st.dialog(title="Chat with Gemini", width="large")
-def chat_with_gemini(context, api_key):
+def chat_with_gemini():
     """Chat interface to ask questions about the video transcript using Gemini API."""
-    user_input = st.chat_input("Ask something about the video...")
+    context = st.session_state.extracted_text
+    if not context:
+        st.info("Please extract a transcript first before using the chat feature.")
+        return
 
-    if "chat_session" not in st.session_state:
-        st.session_state["chat_session"] = get_gemini_chat(api_key, context)
+    # Initialize chat session if not exists
+    try:
+        if "chat_session" not in st.session_state or st.session_state["chat_session"] is None:
+            st.session_state["chat_session"] = get_gemini_chat(context)
+    except Exception as e:
+        st.error(f"Failed to initialize Gemini chat: {e}")
+        return
+
+    # Initialize chat history if not exists
     if "chat_display_history" not in st.session_state:
         st.session_state["chat_display_history"] = []
 
+    user_input = st.chat_input("Ask something about the video...")
+
+    # Process user input
     if user_input:
         st.session_state["chat_display_history"].append({"role": "user", "content": user_input})
         try:
@@ -86,71 +135,87 @@ def chat_with_gemini(context, api_key):
             st.session_state["chat_display_history"].append({"role": "assistant", "content": answer})
         except Exception as e:
             st.error(f"Gemini Q&A Error: {e}")
+            # Reset chat session on error
+            st.session_state["chat_session"] = None
+            return
 
-    # Display previous messages in reverse order
+    # Display chat history
     for message in reversed(st.session_state["chat_display_history"]):
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-# Process YouTube URL if provided
-if youtube_url:
-    with st.sidebar:
-        if not gemini_api_key:
-            st.warning("Gemini API Key not found. Please add it to your .env file.")
+def render_sidebar():
+    st.sidebar.title("YouTube Transcript Extractor")
+    youtube_url = st.sidebar.text_input("Enter YouTube URL:")
+
+    if youtube_url:
+        if youtube_url != st.session_state.youtube_url:
+            st.session_state.extracted_text = ""
+            st.session_state.summarized_text = ""
+            st.session_state.youtube_url = youtube_url
 
         video_id = get_youtube_id(youtube_url)
-        if video_id:
-            try:
-                # Get available transcripts
-                transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-                available_languages = {t.language_code: t for t in transcript_list}
+        if not video_id:
+            st.sidebar.error("Invalid YouTube URL.")
+            return
 
-                if available_languages:
-                    # Language selection
-                    selected_lang_code = st.selectbox(
-                        "Select subtitle language:",
-                        sorted(list(available_languages.keys()))
-                    )
+        try:
+            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+            available_languages = {t.language_code: t for t in transcript_list}
 
-                    # Extract transcript
-                    if selected_lang_code:
-                        if st.button("Extract Transcript", width="stretch"):
-                            with st.spinner("Extracting transcript..."):
-                                try:
-                                    transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=[selected_lang_code])
-                                    cleaned_text = "\n".join(item['text'] for item in transcript)
-                                    st.session_state.extracted_text = cleaned_text
+            if not available_languages:
+                st.sidebar.warning("No subtitles available for this video.")
+                return
 
-                                except NoTranscriptFound:
-                                    st.error(f"No transcript found for the selected language.")
-                                    st.session_state.extracted_text = ""
-                                except Exception as e:
-                                    st.error(f"An error occurred while extracting the transcript: {e}")
-                                    st.session_state.extracted_text = ""
-                else:
-                    st.warning("No subtitles are available for this video.")
-                    st.session_state.extracted_text = ""
+            selected_lang_code = st.sidebar.selectbox(
+                "Select subtitle language:",
+                sorted(list(available_languages.keys()))
+            )
 
-            except (NoTranscriptFound, TranscriptsDisabled) as e:
-                st.warning(f"Subtitle error: {e}")
-                st.session_state.extracted_text = ""
-            except Exception as e:
-                st.error(f"An unexpected error occurred: {e}")
-                st.session_state.extracted_text = ""
-        else:
-            st.error("Invalid YouTube URL.")
-            st.session_state.extracted_text = ""
+            if st.sidebar.button("Extract Transcript", use_container_width=True):
+                get_youtube_transcript(youtube_url, video_id, selected_lang_code)
 
+        except (NoTranscriptFound, TranscriptsDisabled) as e:
+            st.sidebar.warning(f"Subtitle error: {e}")
+        except Exception as e:
+            st.sidebar.error(f"An unexpected error occurred: {e}")
+
+def render_main_content():
+    """Renders the main content area (tabs)."""
+    tab1, tab2, tab3 = st.tabs(["Transcript", "AI Summary", "Chatbot"])
+
+    with tab1:
         if st.session_state.extracted_text:
-            if st.button("Organize by Gemini", width="stretch"):
-                with st.spinner("Organizing by Gemini..."):
-                    st.session_state.organized_text = organize_text_with_gemini(st.session_state.extracted_text, gemini_api_key)
-            if st.button("Chat with Gemini", width="stretch"):
-                chat_with_gemini(st.session_state.extracted_text, gemini_api_key)
+            st.code(st.session_state.extracted_text, language='text', height=800)
+        else:
+            st.info("Transcript will appear here after extraction.")
 
-if st.session_state.organized_text:
-    st.markdown(st.session_state.organized_text)
-elif st.session_state.extracted_text:
-    st.write(st.session_state.extracted_text)
-else:
-    st.info("Enter YouTube URL and click 'Extract Transcript' to begin.")
+    with tab2:
+        if st.session_state.extracted_text:
+            summarized = summarize_text_with_gemini()
+            if summarized:
+                st.session_state.summarized_text = summarized
+                st.sidebar.success("AI summary generated successfully!")
+
+        if st.session_state.summarized_text:
+            st.markdown(st.session_state.summarized_text)
+        else:
+            st.info("Organized summary will appear here after processing with Gemini.")
+
+    with tab3:
+        if st.session_state.extracted_text:
+            chat_with_gemini()
+        else:
+            st.info("Chatbot will appear here after extraction.")
+
+def main():
+    load_dotenv()
+    st.set_page_config(layout="wide", page_title="YouTube Transcript Extractor", page_icon="🎥")
+    initialize_session_state()
+
+    # Render UI
+    render_sidebar()
+    render_main_content()
+
+if __name__ == "__main__":
+    main()
