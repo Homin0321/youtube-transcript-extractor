@@ -105,6 +105,16 @@ def summarize_text_with_gemini():
         st.error(f"Gemini API Error: {e}")
         return None
 
+def initialize_chat_session(context):
+    """Initialize or reset chat session with transcript context."""
+    try:
+        st.session_state["chat_session"] = get_gemini_chat(context)
+        st.session_state["chat_display_history"] = []
+    except Exception as e:
+        st.error(f"Failed to initialize Gemini chat: {e}")
+        st.session_state["chat_session"] = None
+        st.session_state["chat_display_history"] = []
+
 def chat_with_gemini():
     """Chat interface to ask questions about the video transcript using Gemini API."""
     context = st.session_state.extracted_text
@@ -113,16 +123,10 @@ def chat_with_gemini():
         return
 
     # Initialize chat session if not exists
-    try:
-        if "chat_session" not in st.session_state or st.session_state["chat_session"] is None:
-            st.session_state["chat_session"] = get_gemini_chat(context)
-    except Exception as e:
-        st.error(f"Failed to initialize Gemini chat: {e}")
-        return
-
-    # Initialize chat history if not exists
-    if "chat_display_history" not in st.session_state:
-        st.session_state["chat_display_history"] = []
+    if "chat_session" not in st.session_state or st.session_state["chat_session"] is None:
+        initialize_chat_session(context)
+        if st.session_state["chat_session"] is None:
+            return
 
     user_input = st.chat_input("Ask something about the video...")
 
@@ -136,7 +140,7 @@ def chat_with_gemini():
         except Exception as e:
             st.error(f"Gemini Q&A Error: {e}")
             # Reset chat session on error
-            st.session_state["chat_session"] = None
+            initialize_chat_session(context)
             return
 
     # Display chat history
@@ -152,6 +156,7 @@ def render_sidebar():
         if youtube_url != st.session_state.youtube_url:
             st.session_state.extracted_text = ""
             st.session_state.summarized_text = ""
+            st.session_state["chat_session"] = None
             st.session_state.youtube_url = youtube_url
 
         video_id = get_youtube_id(youtube_url)
