@@ -114,6 +114,7 @@ def get_gemini_chat(context):
         )
     return chat
 
+@st.cache_data
 def summarize_text_with_gemini(extracted_text):
     """
     Process transcript using Gemini AI to generate a structured summary.
@@ -155,23 +156,12 @@ def initialize_chat_session(context):
         st.session_state["chat_session"] = None
         st.session_state["chat_display_history"] = []
 
-def chat_with_gemini(extracted_text):
+def chat_with_gemini(context):
     """
     Implements chat interface for transcript Q&A using Gemini API.
     Args:
-        extracted_text (str): The transcript text to chat about
+        context (str): The transcript text to chat about
     """
-    context = extracted_text
-    if not context:
-        st.info("Please extract a transcript first before using the chat feature.")
-        return
-
-    # Initialize chat session if not exists or was reset
-    if "chat_session" not in st.session_state or st.session_state["chat_session"] is None:
-        initialize_chat_session(context)
-        if st.session_state["chat_session"] is None:
-            return
-
     # Create chat input interface
     user_input = st.chat_input("Ask something about the video...")
 
@@ -260,7 +250,7 @@ def render_main_content():
 
     # Tab 2: AI Summary
     with tab2:
-        if st.session_state.extracted_text:
+        if st.session_state.extracted_text and not st.session_state.summarized_text:
             # Generate AI summary if transcript exists
             summarized = summarize_text_with_gemini(st.session_state.extracted_text)
             if summarized:
@@ -275,6 +265,9 @@ def render_main_content():
     # Tab 3: Interactive Chatbot
     with tab3:
         if st.session_state.extracted_text:
+            if "chat_session" not in st.session_state or st.session_state["chat_session"] is None:
+                initialize_chat_session(st.session_state.extracted_text)
+
             chat_with_gemini(st.session_state.extracted_text)
         else:
             st.info("Chatbot will appear here after extraction.")
