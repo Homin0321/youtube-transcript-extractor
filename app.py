@@ -109,6 +109,20 @@ def get_youtube_transcript(youtube_url, video_id, selected_lang_code):
             st.session_state.extracted_text = ""
 
 
+def fix_bold_symbol_issue(md: str) -> str:
+    pattern = re.compile(r"\*\*(.+?)\*\*(\s*)", re.DOTALL)
+
+    def repl(m):
+        inner = m.group(1)
+        after = m.group(2)
+        # Add space after ** if content contains symbols and no space exists
+        if re.search(r"[^0-9A-Za-z\s]", inner) and after == "":
+            return f"**{inner}** "
+        return m.group(0)
+
+    return pattern.sub(repl, md)
+
+
 @st.cache_resource
 def get_gemini_model():
     """
@@ -206,7 +220,7 @@ def chat_with_gemini(context):
         try:
             # Get AI response
             response = st.session_state["chat_session"].send_message(user_input)
-            answer = response.text.strip()
+            answer = fix_bold_symbol_issue(response.text.strip())
             # Add AI response to chat history
             st.session_state["chat_display_history"].append(
                 {"role": "assistant", "content": answer}
@@ -300,7 +314,7 @@ def render_main_content():
             # Generate AI summary if transcript exists
             summarized = summarize_text_with_gemini(st.session_state.extracted_text)
             if summarized:
-                st.session_state.summarized_text = summarized
+                st.session_state.summarized_text = fix_bold_symbol_issue(summarized)
                 st.sidebar.success("AI summary generated successfully!")
 
         if st.session_state.summarized_text:
