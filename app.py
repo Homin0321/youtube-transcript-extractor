@@ -1,14 +1,29 @@
-import re
 import os
-from dotenv import load_dotenv
-import streamlit as st
-from youtube_transcript_api import YouTubeTranscriptApi, NoTranscriptFound, TranscriptsDisabled
+import re
+
 import google.generativeai as genai
+import streamlit as st
+from dotenv import load_dotenv
+from youtube_transcript_api import (
+    NoTranscriptFound,
+    TranscriptsDisabled,
+    YouTubeTranscriptApi,
+)
 
 # Configuration constants
-GEMINI_MODEL_NAME = 'gemini-flash-lite-latest'
+AVAILABLE_GEMINI_MODELS = [
+    "gemini-flash-lite-latest",
+    "gemini-flash-latest",
+    "gemini-2.5-flash-lite",
+    "gemini-2.5-flash",
+    "gemini-2.5-pro",
+    "gemini-3-flash-preview",
+    "gemini-3-pro-preview",
+]
+
+DEFAULT_GEMINI_MODEL = "gemini-flash-latest"  # Changed default model
 # Prompt template for Gemini AI to analyze video transcripts
-TRANSCRIPT_ANALYSIS_PROMPT = """Please analyze the following video transcript and provide a piece of organized content with the following structure:
+TRANSCRIPT_ANALYSIS_PROMPT = """Please analyze the following video transcript and provide a piece of organized content in the same language as the transcript, with the following structure:
 
 1.  **Title:** (A concise and descriptive title for the video)
 2.  **Executive Summary:** (2-3 sentences providing a high-level overview of the video's purpose and key takeaways)
@@ -16,21 +31,24 @@ TRANSCRIPT_ANALYSIS_PROMPT = """Please analyze the following video transcript an
 
 Transcript content: """
 
+
 def initialize_session_state():
     """Initialize Streamlit session state variables with default values"""
     default_values = {
-        'youtube_url': "",  # Store the current YouTube URL
-        'gemini_api_key': os.getenv("GEMINI_API_KEY", ""),  # API key for Gemini AI
-        'extracted_text': "",  # Store the extracted transcript
-        'summarized_text': "",  # Store the AI-generated summary
-        'chat_session': None,  # Store the Gemini chat session
-        'chat_display_history': []  # Store chat message history
+        "youtube_url": "",  # Store the current YouTube URL
+        "gemini_api_key": os.getenv("GEMINI_API_KEY", ""),  # API key for Gemini AI
+        "gemini_model_name": DEFAULT_GEMINI_MODEL,  # Store the selected Gemini model name
+        "extracted_text": "",  # Store the extracted transcript
+        "summarized_text": "",  # Store the AI-generated summary
+        "chat_session": None,  # Store the Gemini chat session
+        "chat_display_history": [],  # Store chat message history
     }
-    
+
     # Set default values if not already in session state
     for key, value in default_values.items():
         if key not in st.session_state:
             st.session_state[key] = value
+
 
 @st.cache_data
 def get_youtube_id(url):
@@ -42,14 +60,15 @@ def get_youtube_id(url):
         str: Video ID if found, None otherwise
     """
     # Check standard YouTube URL format
-    match = re.search(r'(?:v=|youtu\.be/)([^&?]+)', url)
+    match = re.search(r"(?:v=|youtu\.be/)([^&?]+)", url)
     if match:
         return match.group(1)
     # Check YouTube Shorts URL format
-    match = re.search(r'shorts/([^?]+)', url)
+    match = re.search(r"shorts/([^?]+)", url)
     if match:
         return match.group(1)
     return None
+
 
 @st.cache_data
 def get_youtube_transcript(youtube_url, video_id, selected_lang_code):
@@ -60,16 +79,20 @@ def get_youtube_transcript(youtube_url, video_id, selected_lang_code):
     if not youtube_url or not video_id:
         st.sidebar.error("Invalid YouTube URL or video ID.")
         return
-    
+
     if not selected_lang_code:
-        st.sidebar.error("Please select a subtitle language before extracting the transcript.")
+        st.sidebar.error(
+            "Please select a subtitle language before extracting the transcript."
+        )
         return
-        
+
     with st.spinner("Extracting transcript..."):
         try:
             # Fetch transcript using YouTube API
-            transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=[selected_lang_code])
-            cleaned_text = "\n".join(item['text'] for item in transcript)
+            transcript = YouTubeTranscriptApi.get_transcript(
+                video_id, languages=[selected_lang_code]
+            )
+            cleaned_text = "\n".join(item["text"] for item in transcript)
             st.session_state.extracted_text = cleaned_text
             st.sidebar.success("Transcript successfully extracted!")
 
@@ -80,8 +103,11 @@ def get_youtube_transcript(youtube_url, video_id, selected_lang_code):
             st.sidebar.error("Transcripts are disabled for this video.")
             st.session_state.extracted_text = ""
         except Exception as e:
-            st.sidebar.error(f"An error occurred while extracting the transcript: {str(e)}")
+            st.sidebar.error(
+                f"An error occurred while extracting the transcript: {str(e)}"
+            )
             st.session_state.extracted_text = ""
+
 
 @st.cache_resource
 def get_gemini_model():
@@ -95,7 +121,8 @@ def get_gemini_model():
         return None
 
     genai.configure(api_key=st.session_state.gemini_api_key)
-    return genai.GenerativeModel(GEMINI_MODEL_NAME)
+    return genai.GenerativeModel(st.session_state.gemini_model_name)
+
 
 def get_gemini_chat(context):
     """
@@ -114,6 +141,7 @@ def get_gemini_chat(context):
         )
     return chat
 
+
 @st.cache_data
 def summarize_text_with_gemini(extracted_text):
     """
@@ -126,19 +154,22 @@ def summarize_text_with_gemini(extracted_text):
     try:
         text = extracted_text.strip()
         if not text:
-            st.warning("Extracted transcript is empty. Please extract the transcript first.")
+            st.warning(
+                "Extracted transcript is empty. Please extract the transcript first."
+            )
             return None
         with st.spinner("Summarizing text with Gemini..."):
             model = get_gemini_model()
             response = model.generate_content(TRANSCRIPT_ANALYSIS_PROMPT + text)
 
-        if not hasattr(response, 'text'):
+        if not hasattr(response, "text"):
             st.error("Gemini API response does not contain text.")
             return None
         return response.text
     except Exception as e:
         st.error(f"Gemini API Error: {e}")
         return None
+
 
 def initialize_chat_session(context):
     """
@@ -156,6 +187,7 @@ def initialize_chat_session(context):
         st.session_state["chat_session"] = None
         st.session_state["chat_display_history"] = []
 
+
 def chat_with_gemini(context):
     """
     Implements chat interface for transcript Q&A using Gemini API.
@@ -168,13 +200,17 @@ def chat_with_gemini(context):
     # Process user message and get AI response
     if user_input:
         # Add user message to chat history
-        st.session_state["chat_display_history"].append({"role": "user", "content": user_input})
+        st.session_state["chat_display_history"].append(
+            {"role": "user", "content": user_input}
+        )
         try:
             # Get AI response
             response = st.session_state["chat_session"].send_message(user_input)
             answer = response.text.strip()
             # Add AI response to chat history
-            st.session_state["chat_display_history"].append({"role": "assistant", "content": answer})
+            st.session_state["chat_display_history"].append(
+                {"role": "assistant", "content": answer}
+            )
         except Exception as e:
             st.error(f"Gemini Q&A Error: {e}")
             # Reset chat session on error
@@ -185,6 +221,7 @@ def chat_with_gemini(context):
     for message in reversed(st.session_state["chat_display_history"]):
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
+
 
 def render_sidebar():
     """
@@ -219,18 +256,27 @@ def render_sidebar():
 
             # Create language selection dropdown
             selected_lang_code = st.sidebar.selectbox(
-                "Select subtitle language:",
-                sorted(list(available_languages.keys()))
+                "Select subtitle language:", sorted(list(available_languages.keys()))
             )
-
-            # Extract transcript button
-            if st.sidebar.button("Extract Transcript", use_container_width=True):
-                get_youtube_transcript(youtube_url, video_id, selected_lang_code)
 
         except (NoTranscriptFound, TranscriptsDisabled) as e:
             st.sidebar.warning(f"Subtitle error: {e}")
+            return  # Exit if no transcripts or disabled, to prevent further errors
         except Exception as e:
             st.sidebar.error(f"An unexpected error occurred: {e}")
+            return  # Exit on unexpected errors
+
+        # Create Gemini model selection dropdown
+        st.session_state.gemini_model_name = st.sidebar.selectbox(
+            "Select Gemini Model:",
+            AVAILABLE_GEMINI_MODELS,
+            index=AVAILABLE_GEMINI_MODELS.index(st.session_state.gemini_model_name),
+        )
+
+        # Extract transcript button
+        if st.sidebar.button("Extract Transcript", use_container_width=True):
+            get_youtube_transcript(youtube_url, video_id, selected_lang_code)
+
 
 def render_main_content():
     """
@@ -244,7 +290,7 @@ def render_main_content():
     # Tab 1: Raw Transcript
     with tab1:
         if st.session_state.extracted_text:
-            st.code(st.session_state.extracted_text, language='text', height=800)
+            st.code(st.session_state.extracted_text, language="text", height=800)
         else:
             st.info("Transcript will appear here after extraction.")
 
@@ -265,12 +311,16 @@ def render_main_content():
     # Tab 3: Interactive Chatbot
     with tab3:
         if st.session_state.extracted_text:
-            if "chat_session" not in st.session_state or st.session_state["chat_session"] is None:
+            if (
+                "chat_session" not in st.session_state
+                or st.session_state["chat_session"] is None
+            ):
                 initialize_chat_session(st.session_state.extracted_text)
 
             chat_with_gemini(st.session_state.extracted_text)
         else:
             st.info("Chatbot will appear here after extraction.")
+
 
 def main():
     """
@@ -279,12 +329,15 @@ def main():
     """
     load_dotenv()  # Load environment variables
     # Configure Streamlit page settings
-    st.set_page_config(layout="wide", page_title="YouTube Transcript Extractor", page_icon="🎥")
+    st.set_page_config(
+        layout="wide", page_title="YouTube Transcript Extractor", page_icon="🎥"
+    )
     initialize_session_state()  # Initialize session state variables
 
     # Render UI components
     render_sidebar()
     render_main_content()
+
 
 if __name__ == "__main__":
     main()
