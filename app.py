@@ -88,11 +88,11 @@ def get_youtube_transcript(youtube_url, video_id, selected_lang_code):
 
     with st.spinner("Extracting transcript..."):
         try:
-            # Fetch transcript using YouTube API
-            transcript = YouTubeTranscriptApi.get_transcript(
+            # Fetch transcript using YouTube API (v1.x instance-based API)
+            transcript = YouTubeTranscriptApi().fetch(
                 video_id, languages=[selected_lang_code]
             )
-            cleaned_text = "\n".join(item["text"] for item in transcript)
+            cleaned_text = "\n".join(snippet.text for snippet in transcript)
             st.session_state.extracted_text = cleaned_text
             st.sidebar.success("Transcript successfully extracted!")
 
@@ -260,8 +260,8 @@ def render_sidebar():
             return
 
         try:
-            # Get available transcripts for the video
-            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+            # Get available transcripts for the video (v1.x instance-based API)
+            transcript_list = YouTubeTranscriptApi().list(video_id)
             available_languages = {t.language_code: t for t in transcript_list}
 
             if not available_languages:
