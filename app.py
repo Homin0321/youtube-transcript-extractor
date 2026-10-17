@@ -290,6 +290,19 @@ def render_sidebar():
         # Extract transcript button
         if st.sidebar.button("Extract Transcript", use_container_width=True):
             get_youtube_transcript(youtube_url, video_id, selected_lang_code)
+            # Clear any previous summary so it won't show stale results
+            st.session_state.summarized_text = ""
+
+        # AI Summary button (separate step, only enabled after extraction)
+        if st.sidebar.button(
+            "Generate AI Summary",
+            use_container_width=True,
+            disabled=not st.session_state.extracted_text,
+        ):
+            summarized = summarize_text_with_gemini(st.session_state.extracted_text)
+            if summarized:
+                st.session_state.summarized_text = fix_bold_symbol_issue(summarized)
+                st.sidebar.success("AI summary generated successfully!")
 
 
 def render_main_content():
@@ -310,15 +323,10 @@ def render_main_content():
 
     # Tab 2: AI Summary
     with tab2:
-        if st.session_state.extracted_text and not st.session_state.summarized_text:
-            # Generate AI summary if transcript exists
-            summarized = summarize_text_with_gemini(st.session_state.extracted_text)
-            if summarized:
-                st.session_state.summarized_text = fix_bold_symbol_issue(summarized)
-                st.sidebar.success("AI summary generated successfully!")
-
         if st.session_state.summarized_text:
             st.markdown(st.session_state.summarized_text)
+        elif st.session_state.extracted_text:
+            st.info("Click 'Generate AI Summary' in the sidebar to create a summary.")
         else:
             st.info("Organized summary will appear here after processing with Gemini.")
 
